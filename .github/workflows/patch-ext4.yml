@@ -23,7 +23,7 @@ on:
       kernel_name:
         description: 'Name of the replacement kernel file'
         required: true
-        default: 'bzImage'
+        default: 'kernel'
 
 permissions:
   contents: read
