@@ -66,11 +66,15 @@ jobs:
         run: |
           set -eu
           cd kernel
-          ln -sf ../KernelSU/kernel drivers/kernelsu
+          # Copy rather than symlink: the Kconfig parser resolves the path
+          # relative to the kernel tree and a link pointing outside it breaks.
+          rm -rf drivers/kernelsu
+          cp -r "$GITHUB_WORKSPACE/KernelSU/kernel" drivers/kernelsu
           grep -q "kernelsu" drivers/Makefile || \
             printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || \
             sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          ls drivers/kernelsu/Kconfig
           echo "integration done"
 
       - name: Apply the emulator kernel config
@@ -105,8 +109,9 @@ jobs:
           export LLVM_IAS=1
           export KBUILD_BUILD_USER=build
           export KBUILD_BUILD_HOST=build-host
-          # Reproduce the emulator's release string: 6.1.90-perf+
-          export KERNELRELEASE=6.1.90-perf+
+          # The release string comes from CONFIG_LOCALVERSION="-perf" in the
+          # config; the trailing '+' is added by setlocalversion because the
+          # tree is not on an annotated tag, exactly like the original.
           make -j"$(nproc)" bzImage
           ls -la arch/x86/boot/bzImage
           echo "sha256: $(sha256sum arch/x86/boot/bzImage | cut -d' ' -f1)"
