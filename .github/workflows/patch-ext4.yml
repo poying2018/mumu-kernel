@@ -1,0 +1,88 @@
+# Replace the /kernel file inside the emulator's ext4 boot partition.
+#
+# The MuMu base disk (system.vdi) holds an ext4 partition whose only four
+# entries are cmdline, kernel, initrd and ramdisk; the emulator's loader reads
+# /kernel from it and boots it. The partition is read-only inside the guest,
+# so the swap has to happen offline.
+#
+# This workflow takes the extracted ext4 image and the new bzImage, replaces
+# the file with debugfs, and returns the modified partition. The caller then
+# splices it back into the raw disk and converts that to a VDI.
+#
+# debugfs rewrites the inode and allocates new blocks, so the file may change
+# size; the partition has free space for that.
+name: patch-ext4-kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      ext4_name:
+        description: 'Name of the ext4 image file in this repository'
+        required: true
+        default: 'system-part3.ext4'
+      kernel_name:
+        description: 'Name of the replacement kernel file'
+        required: true
+        default: 'bzImage'
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: helper
+
+      - name: Install e2fsprogs
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs
+          debugfs -V 2>&1 | head -1
+
+      - name: Inspect the filesystem
+        run: |
+          set -eu
+          cd helper
+          debugfs -R "ls -l /" "${{ inputs.ext4_name }}" 2>&1 | tail -20
+          echo "--- stats ---"
+          debugfs -R "stats" "${{ inputs.ext4_name }}" 2>&1 | grep -iE "block count|free blocks|inode count|free inodes|block size" | head -8
+
+      - name: Replace the kernel
+        run: |
+          set -eu
+          cd helper
+          IMG="${{ inputs.ext4_name }}"
+          cp "$IMG" patched.ext4
+
+          # The loader reads the file as root, but keep the original mode and
+          # ownership so the image stays identical in every other respect.
+          echo "--- original ---"
+          debugfs -R "stat /kernel" patched.ext4 2>&1 | grep -iE "Mode|User|Group|Size" | head -6
+
+          debugfs -w -R "rm /kernel" patched.ext4 2>&1 | tail -2
+          debugfs -w -R "write ${{ inputs.kernel_name }} /kernel" patched.ext4 2>&1 | tail -3
+          debugfs -w -R "set_inode_field /kernel mode 0100644" patched.ext4 2>&1 | tail -1
+          debugfs -w -R "set_inode_field /kernel uid 0" patched.ext4 2>&1 | tail -1
+          debugfs -w -R "set_inode_field /kernel gid 0" patched.ext4 2>&1 | tail -1
+
+          echo "--- verify ---"
+          debugfs -R "ls -l /" patched.ext4 2>&1 | tail -10
+          debugfs -R "stat /kernel" patched.ext4 2>&1 | grep -iE "Mode|User|Group|Size" | head -6
+
+      - name: Check the filesystem
+        run: |
+          set -eu
+          cd helper
+          sudo e2fsck -fn patched.ext4 2>&1 | tail -12
+
+      - name: Upload the patched partition
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-ext4
+          path: helper/patched.ext4
+          if-no-files-found: error
