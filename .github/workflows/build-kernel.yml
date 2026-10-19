@@ -90,6 +90,16 @@ jobs:
           make olddefconfig
           grep -E "^CONFIG_(KSU|LOCALVERSION|DEFAULT_HOSTNAME|MODULES)=" .config || true
 
+      - name: Install build dependencies
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison flex libssl-dev libelf-dev libncurses-dev \
+            python3 pahole rsync cpio kmod zstd
+          bison --version | head -1
+          flex --version
+
       - name: Install the Android clang toolchain
         run: |
           set -eu
