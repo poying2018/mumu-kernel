@@ -42,6 +42,11 @@ jobs:
           fetch-depth: 1
           submodules: false
 
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: helper
+
       - name: Verify the kernel version
         run: |
           set -eu
@@ -72,9 +77,7 @@ jobs:
         run: |
           set -eu
           cd kernel
-          cp "$GITHUB_WORKSPACE/mumu-kernel.config" .config
-          # The emulator's kernel enables none of the hardening options that
-          # would change the generated code, and it was built with LTO off.
+          cp "$GITHUB_WORKSPACE/helper/mumu-kernel.config" .config
           scripts/config --file .config \
             -e LTO_NONE -d LTO_CLANG -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
           make olddefconfig
