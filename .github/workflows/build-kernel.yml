@@ -1,0 +1,122 @@
+# Build a Linux 6.1.90 kernel for the MuMu emulator with SukiSU built in.
+#
+# MuMu 12 runs Android 15 on a VirtualBox 7.2.4 x86_64 guest. Its kernel is
+# a stock Android GKI 6.1.90 ("perf" flavour: CONFIG_LOCALVERSION="-perf",
+# CONFIG_DEFAULT_HOSTNAME="perf"), built with Android clang r536225. The
+# original kernel image lives in the read-only base disk's ext4 partition and
+# is loaded by the emulator's own loader, not through the Android OTA path.
+#
+# This workflow reproduces that kernel from the upstream 6.1.90 release tag
+# with the exact config the running kernel reports, adds SukiSU as a built-in
+# driver, and produces a bzImage that can replace the original.
+#
+# The manager identity is SukiSU's own (cert 0x35c / sha256 947ae944...),
+# which is what the Kbuild defaults already specify.
+name: build-mumu-kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_source:
+        description: 'SukiSU source repository'
+        required: true
+        default: 'SukiSU-Ultra/SukiSU-Ultra'
+      ksu_ref:
+        description: 'SukiSU git ref'
+        required: true
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: aosp-mirror/kernel_common
+          ref: android14-6.1.90_r00
+          path: kernel
+          fetch-depth: 1
+          submodules: false
+
+      - name: Verify the kernel version
+        run: |
+          set -eu
+          cd kernel
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' Makefile | head -3
+          test "$(grep '^SUBLEVEL =' Makefile | awk '{print $3}')" = "90"
+
+      - name: Fetch SukiSU
+        run: |
+          set -eu
+          git clone --depth 1 --branch "${{ inputs.ksu_ref }}" \
+            "https://github.com/${{ inputs.ksu_source }}.git" KernelSU
+          cd KernelSU
+          git rev-parse HEAD
+
+      - name: Install SukiSU into the kernel tree
+        run: |
+          set -eu
+          cd kernel
+          ln -sf ../KernelSU/kernel drivers/kernelsu
+          grep -q "kernelsu" drivers/Makefile || \
+            printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || \
+            sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          echo "integration done"
+
+      - name: Apply the emulator kernel config
+        run: |
+          set -eu
+          cd kernel
+          cp "$GITHUB_WORKSPACE/mumu-kernel.config" .config
+          # The emulator's kernel enables none of the hardening options that
+          # would change the generated code, and it was built with LTO off.
+          scripts/config --file .config \
+            -e LTO_NONE -d LTO_CLANG -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
+          make olddefconfig
+          # SukiSU is built in, not a module.
+          scripts/config --file .config -e KSU -d MODULES
+          make olddefconfig
+          grep -E "^CONFIG_(KSU|LOCALVERSION|DEFAULT_HOSTNAME|MODULES)=" .config || true
+
+      - name: Install the Android clang toolchain
+        run: |
+          set -eu
+          mkdir -p "$HOME/clang"
+          curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r536225.tar.gz" \
+            | tar -xz -C "$HOME/clang"
+          ls "$HOME/clang"/bin/clang
+          "$HOME/clang/bin/clang" --version | head -2
+
+      - name: Build the kernel
+        run: |
+          set -eu
+          cd kernel
+          export PATH="$HOME/clang/bin:$PATH"
+          export ARCH=x86_64
+          export LLVM=1
+          export LLVM_IAS=1
+          export KBUILD_BUILD_USER=build
+          export KBUILD_BUILD_HOST=build-host
+          # Reproduce the emulator's release string: 6.1.90-perf+
+          export KERNELRELEASE=6.1.90-perf+
+          make -j"$(nproc)" bzImage
+          ls -la arch/x86/boot/bzImage
+          echo "sha256: $(sha256sum arch/x86/boot/bzImage | cut -d' ' -f1)"
+
+      - name: Show kernel info
+        run: |
+          set -eu
+          cd kernel
+          strings arch/x86/boot/bzImage | grep -E '^Linux version 6\.1' | head -1
+
+      - name: Upload the kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: bzImage-6.1.90-perf-sukisu
+          path: kernel/arch/x86/boot/bzImage
+          if-no-files-found: error
