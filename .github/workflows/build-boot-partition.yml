@@ -1,0 +1,84 @@
+# Grow the emulator's ext4 boot partition and install the new kernel.
+#
+# The boot partition that holds /kernel is 14317 blocks of 1 KiB and has only
+# 335 free blocks, which is not enough for a kernel that carries SukiSU built
+# in. The partition is grown into the empty space that follows it, then the
+# filesystem is resized and the new kernel is written in.
+#
+# The partition's start LBA does not move, so the emulator's loader finds it
+# exactly where it expects.
+name: build-boot-partition
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_name:
+        description: 'Name of the replacement kernel file'
+        required: true
+        default: 'kernel'
+      extra_mb:
+        description: 'Extra megabytes to add to the partition'
+        required: false
+        default: '8'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: helper
+
+      - name: Install e2fsprogs
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs
+          debugfs -V 2>&1 | head -1
+
+      - name: Grow the filesystem
+        run: |
+          set -eu
+          cd helper
+          cp system-part3.ext4 boot.ext4
+          # The partition is 28634 sectors of 512 bytes; grow it by the
+          # requested amount and let resize2fs use the new space.
+          NEW_SECTORS=$((28634 + ${{ inputs.extra_mb }} * 2048))
+          truncate -s $((NEW_SECTORS * 512)) boot.ext4
+          echo "new partition size: $NEW_SECTORS sectors ($((NEW_SECTORS * 512 / 1024 / 1024)) MB)"
+          sudo resize2fs boot.ext4
+          debugfs -R "stats" boot.ext4 2>&1 | grep -iE "block count|free blocks" | head -4
+
+      - name: Install the kernel
+        run: |
+          set -eu
+          cd helper
+          echo "--- before ---"
+          debugfs -R "ls -l /" boot.ext4 2>&1 | tail -6
+
+          debugfs -w -R "rm /kernel" boot.ext4 2>&1 | tail -1
+          debugfs -w -R "write ${{ inputs.kernel_name }} /kernel" boot.ext4 2>&1 | tail -2
+          # keep the mode and ownership the loader expects
+          debugfs -w -R "set_inode_field /kernel mode 0100644" boot.ext4 2>&1 | tail -1
+          debugfs -w -R "set_inode_field /kernel uid 1000" boot.ext4 2>&1 | tail -1
+          debugfs -w -R "set_inode_field /kernel gid 1000" boot.ext4 2>&1 | tail -1
+
+          echo "--- after ---"
+          debugfs -R "ls -l /" boot.ext4 2>&1 | tail -6
+
+      - name: Check the filesystem
+        run: |
+          set -eu
+          cd helper
+          sudo e2fsck -fn boot.ext4 2>&1 | tail -8
+
+      - name: Upload the partition
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-partition
+          path: helper/boot.ext4
+          if-no-files-found: error
