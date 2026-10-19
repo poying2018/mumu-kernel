@@ -85,8 +85,11 @@ jobs:
           scripts/config --file .config \
             -e LTO_NONE -d LTO_CLANG -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
           make olddefconfig
-          # SukiSU is built in, not a module.
-          scripts/config --file .config -e KSU -d MODULES
+          # SukiSU is built in, not a module. Module support stays on: the
+          # emulator's own kernel keeps 2573 drivers as modules, and turning
+          # them into built-ins grows the image from 12 MB to 50 MB, which does
+          # not fit in the boot partition.
+          scripts/config --file .config -e KSU
           make olddefconfig
           grep -E "^CONFIG_(KSU|LOCALVERSION|DEFAULT_HOSTNAME|MODULES)=" .config || true
 
