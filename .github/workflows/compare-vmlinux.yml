@@ -6,7 +6,7 @@
 # patch has to change to make the kernel accept the SukiSU manager instead.
 name: compare-vmlinux
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       kernel_release:
