@@ -1,12 +1,11 @@
-# Grow the emulator's ext4 boot partition and install the new kernel.
+# Install the new kernel into the emulator's ext4 boot partition.
 #
 # The boot partition that holds /kernel is 14317 blocks of 1 KiB and has only
-# 335 free blocks, which is not enough for a kernel that carries SukiSU built
-# in. The partition is grown into the empty space that follows it, then the
-# filesystem is resized and the new kernel is written in.
+# 335 free blocks. The rebuilt kernel is about 280 KiB larger than the original,
+# which still fits, so the partition geometry is left alone: the emulator's
+# loader does not cope with a boot partition of a different size.
 #
-# The partition's start LBA does not move, so the emulator's loader finds it
-# exactly where it expects.
+# Use extra_mb=0 for the normal path.
 name: build-boot-partition
 
 on:
@@ -45,12 +44,18 @@ jobs:
           set -eu
           cd helper
           cp system-part3.ext4 boot.ext4
-          # The partition is 28634 sectors of 512 bytes; grow it by the
-          # requested amount and let resize2fs use the new space.
+          # The partition is 28634 sectors of 512 bytes. Growing it changes the
+          # partition table, and the emulator's loader does not cope with a
+          # boot partition of a different size, so extra_mb=0 keeps the
+          # original geometry and only swaps the file.
           NEW_SECTORS=$((28634 + ${{ inputs.extra_mb }} * 2048))
-          truncate -s $((NEW_SECTORS * 512)) boot.ext4
-          echo "new partition size: $NEW_SECTORS sectors ($((NEW_SECTORS * 512 / 1024 / 1024)) MB)"
-          sudo resize2fs boot.ext4
+          if [ "${{ inputs.extra_mb }}" != "0" ]; then
+            truncate -s $((NEW_SECTORS * 512)) boot.ext4
+            echo "new partition size: $NEW_SECTORS sectors ($((NEW_SECTORS * 512 / 1024 / 1024)) MB)"
+            sudo resize2fs boot.ext4
+          else
+            echo "keeping the original partition size"
+          fi
           debugfs -R "stats" boot.ext4 2>&1 | grep -iE "block count|free blocks" | head -4
 
       - name: Install the kernel
