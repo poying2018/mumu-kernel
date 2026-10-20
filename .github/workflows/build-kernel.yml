@@ -87,6 +87,35 @@ jobs:
             sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           echo "integration done"
 
+      - name: Prepare the x86_64 kdir
+        run: |
+          set -eu
+          clang --version | head -1
+          unset ARCH CROSS_COMPILE
+          export ARCH=x86_64
+
+          KDIR=/opt/ddk/kdir-x64/android14-6.1
+          mkdir -p "$KDIR"
+
+          pushd /opt/ddk/src/android14-6.1
+
+          # Let the module keep symbols it resolves at runtime.
+          MODPOST=scripts/mod/modpost.c
+          sed -i -E 's/^([[:space:]]*)check_exports\(mod\);/\1\/\/ check_exports(mod);/' "$MODPOST"
+          sed -i -E 's/^([[:space:]]*)s->module = exp->module;/\1\/\/ s->module = exp->module;/' "$MODPOST"
+          sed -i 's/^static void check_exports(/static void __attribute__((unused)) check_exports(/' "$MODPOST"
+          sed -i 's/__version_ext_names\\") =\\n/__version_ext_names\\") = \\"\\"\\n/' "$MODPOST"
+
+          make O="$KDIR" gki_defconfig
+          scripts/config --file "$KDIR/.config" \
+            -d LTO_CLANG -e LTO_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
+          make O="$KDIR" olddefconfig
+          make O="$KDIR" modules_prepare
+          make O="$KDIR" security/selinux/built-in.a
+
+          popd
+          echo "kdir ready: $KDIR"
+
       - name: Apply the emulator kernel config
         run: |
           set -eu
