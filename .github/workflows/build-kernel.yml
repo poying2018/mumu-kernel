@@ -70,6 +70,13 @@ jobs:
           # relative to the kernel tree and a link pointing outside it breaks.
           rm -rf drivers/kernelsu
           cp -r "$GITHUB_WORKSPACE/KernelSU/kernel" drivers/kernelsu
+          # kernel/include/uapi is a symlink to ../../uapi, i.e. to the
+          # repository root, which does not exist once kernel/ is copied on
+          # its own. The sources include "uapi/app_profile.h", so the real
+          # headers have to sit next to the driver directory.
+          rm -f drivers/kernelsu/include/uapi
+          cp -r "$GITHUB_WORKSPACE/KernelSU/uapi" drivers/kernelsu/uapi
+          ls drivers/kernelsu/uapi/app_profile.h
           grep -q "kernelsu" drivers/Makefile || \
             printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || \
