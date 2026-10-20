@@ -132,6 +132,15 @@ jobs:
           # The release string comes from CONFIG_LOCALVERSION="-perf" in the
           # config; the trailing '+' is added by setlocalversion because the
           # tree is not on an annotated tag, exactly like the original.
+          #
+          # x86_64 needs CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER: upstream
+          # hardened the syscall table, so the hook has to patch the dispatcher
+          # at runtime instead of relying on a source patch. The alternative
+          # source patches do not exist for 6.1.
+          scripts/config --file .config -e KSU_X86_PATCH_SYSCALL_DISPATCHER
+          make olddefconfig
+          grep -E "^CONFIG_KSU" .config || true
+
           make -j"$(nproc)" bzImage
           ls -la arch/x86/boot/bzImage
           echo "sha256: $(sha256sum arch/x86/boot/bzImage | cut -d' ' -f1)"
