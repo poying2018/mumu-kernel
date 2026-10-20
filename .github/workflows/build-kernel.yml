@@ -94,11 +94,13 @@ jobs:
           unset ARCH CROSS_COMPILE
           export ARCH=x86_64
 
-          ls -la /opt/ddk/ /opt/ddk/src/ 2>&1 | head -20
-          KDIR=/opt/ddk/kdir-x64/android14-6.1
+          KDIR="$GITHUB_WORKSPACE/kdir-x64"
+          rm -rf "$KDIR"
           mkdir -p "$KDIR"
 
-          pushd /opt/ddk/src
+          # The x86_64 kdir is generated from the checked out 6.1.90 source,
+          # which is the same tree the emulator's own kernel came from.
+          pushd kernel
 
           # Let the module keep symbols it resolves at runtime.
           MODPOST=scripts/mod/modpost.c
@@ -164,7 +166,7 @@ jobs:
           export LLVM_IAS=1
           export KBUILD_BUILD_USER=build
           export KBUILD_BUILD_HOST=build-host
-          KDIR=/opt/ddk/kdir-x64/android14-6.1
+          KDIR="$GITHUB_WORKSPACE/kdir-x64"
           MDIR="$PWD/kernel"
           ODIR="$PWD/out-x64/android14-6.1"
 
