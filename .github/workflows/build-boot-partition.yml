@@ -11,6 +11,10 @@ name: build-boot-partition
 on:
   workflow_dispatch:
     inputs:
+      artifact_name:
+        description: 'Artifact holding the kernel to install'
+        required: true
+        default: 'bzImage-6.1.90-perf-sukisu'
       kernel_name:
         description: 'Name of the replacement kernel file'
         required: true
@@ -30,6 +34,12 @@ jobs:
       - name: Checkout this repository
         uses: actions/checkout@v4
         with:
+          path: helper
+
+      - name: Download the kernel from the matching build run
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
           path: helper
 
       - name: Install e2fsprogs
