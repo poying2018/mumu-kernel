@@ -1,18 +1,23 @@
-# Compare the drivers built into MuMu's own kernel with a stock 6.1.90 build.
+# Compare the original MuMu kernel with a rebuilt one.
 #
-# The rebuilt kernel installs correctly but does not boot, while a kernel
-# without SukiSU fails the same way, so the missing piece is something MuMu
-# added to its kernel rather than anything SukiSU needs. Diffing the built-in
-# driver lists points at it.
+# MuMu's own kernel is a stock Android GKI 6.1.90 with SukiSU built in and
+# the official KernelSU manager identity baked in. Rebuilding the same source
+# with the same identity should produce an almost identical image, so a diff
+# points at whatever MuMu changed, and at the bytes holding the manager
+# identity.
 name: compare-vmlinux
 
 on:
   workflow_dispatch:
     inputs:
-      plain_release_tag:
-        description: 'Release holding the plain kernel'
+      ksu_variant:
+        description: 'Manager identity to bake in'
         required: true
-        default: 'plain-kernel-test'
+        default: 'official'
+        type: choice
+        options:
+          - official
+          - sukisu
 
 permissions:
   contents: read
@@ -26,57 +31,57 @@ jobs:
         with:
           path: helper
 
-      - name: Install tools
-        run: |
-          set -eu
-          sudo apt-get update
-          sudo apt-get install -y zstd binutils
-          python3 --version
-
       - name: Fetch both kernels
         run: |
           set -eu
           cd helper
-          curl -sL -o kernel-plain.bin \
-            "https://github.com/poying2018/mumu-kernel/releases/download/${{ inputs.plain_release_tag }}/bzImage"
-          ls -la kernel-plain.bin
-          # the original kernel image, as a release asset of the same repo
           curl -sL -o kernel-orig.bin \
             "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/kernel"
           ls -la kernel-orig.bin
+          curl -sL -o kernel-new.bin \
+            "https://github.com/poying2018/mumu-kernel/releases/download/${{ inputs.ksu_variant }}-kernel/bzImage"
+          ls -la kernel-new.bin
 
-      - name: Extract both vmlinux images
+      - name: Extract the vmlinux images
         run: |
           set -eu
           cd helper
-          python3 extract-vmlinux.py kernel-orig.bin vmlinux-orig.bin || true
-          python3 extract-vmlinux.py kernel-plain.bin vmlinux-plain.bin || true
+          # the kernel source ships the extractor
+          curl -sL -o extract-vmlinux \
+            "https://raw.githubusercontent.com/torvalds/linux/v6.1/scripts/extract-vmlinux"
+          chmod +x extract-vmlinux
+          ./extract-vmlinux kernel-orig.bin > vmlinux-orig.bin || true
+          ./extract-vmlinux kernel-new.bin > vmlinux-new.bin || true
           ls -la vmlinux-*.bin 2>/dev/null || true
 
-      - name: List built-in drivers
+      - name: Compare the manager identity constants
         run: |
           set -eu
           cd helper
-          for f in vmlinux-orig.bin vmlinux-plain.bin; do
+          for f in vmlinux-orig.bin vmlinux-new.bin; do
             [ -f "$f" ] || continue
             echo "=== $f ==="
-            strings "$f" | grep -oE '^[a-z0-9_]+(vbox|virtio|vaddr|mumu|hw|vboxip)[a-z0-9_]*$' | sort -u > "$f.drivers"
-            wc -l "$f.drivers"
-            head -20 "$f.drivers"
+            strings "$f" | grep -E "^[0-9a-f]{64}$" | sort -u | head -10
+            echo "--- ksu symbols ---"
+            nm "$f" 2>/dev/null | grep -iE "expected_size|expected_hash|manager" | head -10
           done
-          if [ -f vmlinux-orig.bin.drivers ] && [ -f vmlinux-plain.bin.drivers ]; then
-            echo "=== only in the original (MuMu) kernel ==="
-            comm -23 vmlinux-orig.bin.drivers vmlinux-plain.bin.drivers | head -40
-            echo "=== only in the rebuilt kernel ==="
-            comm -13 vmlinux-orig.bin.drivers vmlinux-plain.bin.drivers | head -20
+
+      - name: Diff the two images
+        run: |
+          set -eu
+          cd helper
+          if [ -f vmlinux-orig.bin ] && [ -f vmlinux-new.bin ]; then
+            echo "sizes: $(stat -c%s vmlinux-orig.bin) vs $(stat -c%s vmlinux-new.bin)"
+            cmp -l vmlinux-orig.bin vmlinux-new.bin 2>/dev/null | head -40 || true
+            echo "differing byte count:"
+            cmp -l vmlinux-orig.bin vmlinux-new.bin 2>/dev/null | wc -l || true
           fi
 
       - name: Upload the extracted images
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vmlinux-compare
+          name: vmlinux-compare-${{ inputs.ksu_variant }}
           path: |
             helper/vmlinux-*.bin
-            helper/*.drivers
           if-no-files-found: ignore
