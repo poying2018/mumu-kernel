@@ -40,12 +40,6 @@ jobs:
         with:
           path: helper
 
-      - name: Download the kernel from the matching build run
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ inputs.artifact_name }}
-          path: helper
-          run-id: ${{ inputs.artifact_run_id }}
 
       - name: Install e2fsprogs
         run: |
