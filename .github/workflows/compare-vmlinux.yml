@@ -1,0 +1,82 @@
+# Compare the drivers built into MuMu's own kernel with a stock 6.1.90 build.
+#
+# The rebuilt kernel installs correctly but does not boot, while a kernel
+# without SukiSU fails the same way, so the missing piece is something MuMu
+# added to its kernel rather than anything SukiSU needs. Diffing the built-in
+# driver lists points at it.
+name: compare-vmlinux
+
+on:
+  workflow_dispatch:
+    inputs:
+      plain_release_tag:
+        description: 'Release holding the plain kernel'
+        required: true
+        default: 'plain-kernel-test'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: helper
+
+      - name: Install tools
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y zstd binutils
+          python3 --version
+
+      - name: Fetch both kernels
+        run: |
+          set -eu
+          cd helper
+          curl -sL -o kernel-plain.bin \
+            "https://github.com/poying2018/mumu-kernel/releases/download/${{ inputs.plain_release_tag }}/bzImage"
+          ls -la kernel-plain.bin
+          # the original kernel image, as a release asset of the same repo
+          curl -sL -o kernel-orig.bin \
+            "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/kernel-orig"
+          ls -la kernel-orig.bin
+
+      - name: Extract both vmlinux images
+        run: |
+          set -eu
+          cd helper
+          python3 extract-vmlinux.py kernel-orig.bin vmlinux-orig.bin || true
+          python3 extract-vmlinux.py kernel-plain.bin vmlinux-plain.bin || true
+          ls -la vmlinux-*.bin 2>/dev/null || true
+
+      - name: List built-in drivers
+        run: |
+          set -eu
+          cd helper
+          for f in vmlinux-orig.bin vmlinux-plain.bin; do
+            [ -f "$f" ] || continue
+            echo "=== $f ==="
+            strings "$f" | grep -oE '^[a-z0-9_]+(vbox|virtio|vaddr|mumu|hw|vboxip)[a-z0-9_]*$' | sort -u > "$f.drivers"
+            wc -l "$f.drivers"
+            head -20 "$f.drivers"
+          done
+          if [ -f vmlinux-orig.bin.drivers ] && [ -f vmlinux-plain.bin.drivers ]; then
+            echo "=== only in the original (MuMu) kernel ==="
+            comm -23 vmlinux-orig.bin.drivers vmlinux-plain.bin.drivers | head -40
+            echo "=== only in the rebuilt kernel ==="
+            comm -13 vmlinux-orig.bin.drivers vmlinux-plain.bin.drivers | head -20
+          fi
+
+      - name: Upload the extracted images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmlinux-compare
+          path: |
+            helper/vmlinux-*.bin
+            helper/*.drivers
+          if-no-files-found: ignore
