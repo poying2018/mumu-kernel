@@ -30,11 +30,8 @@ ls -la vaddress.ko
 
 # A fully built-in kernel produces no Module.symvers; the CRC of every
 # exported symbol lives in the vmlinux as __crc_<name>.
-# nm prints "address type name"; for a __crc_<sym> symbol the address is
-# the CRC value, so the name and the low 32 bits of the address are needed.
-nm "$KDIR/vmlinux" 2>/dev/null \
-    | grep -E " __crc_[A-Za-z0-9_]+$" \
-    | awk '{ n=$3; sub(/^__crc_/, "", n); printf "%s %08x\n", n, strtonum("0x" $1) }' \
+readelf -sW "$KDIR/vmlinux" 2>/dev/null \
+    | awk '$8 ~ /^__crc_/ { n=$8; sub(/^__crc_/, "", n); printf "%s %s\n", n, $3 }' \
     > crcs.txt
 echo "kernel CRC symbols: $(wc -l < crcs.txt)"
 
