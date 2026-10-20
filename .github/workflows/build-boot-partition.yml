@@ -11,14 +11,14 @@ name: build-boot-partition
 on:
   workflow_dispatch:
     inputs:
-      artifact_name:
-        description: 'Artifact holding the kernel to install'
+      release_tag:
+        description: 'Release tag holding the kernel'
         required: true
-        default: 'bzImage-6.1.90-perf-sukisu'
-      artifact_run_id:
-        description: 'Run that produced the artifact'
+        default: 'plain-kernel-test'
+      release_asset:
+        description: 'Asset name of the kernel'
         required: true
-        default: '0'
+        default: 'bzImage-plain'
       kernel_name:
         description: 'Name of the replacement kernel file'
         required: true
@@ -40,6 +40,13 @@ jobs:
         with:
           path: helper
 
+
+      - name: Fetch the kernel
+        run: |
+          set -eu
+          cd helper
+          curl -sL -o "${{ inputs.kernel_name }}"             "https://github.com/poying2018/mumu-kernel/releases/download/${{ inputs.release_tag }}/${{ inputs.release_asset }}"
+          ls -la "${{ inputs.kernel_name }}"
 
       - name: Install e2fsprogs
         run: |
