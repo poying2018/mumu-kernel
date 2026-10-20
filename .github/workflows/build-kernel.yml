@@ -145,6 +145,19 @@ jobs:
           ls -la arch/x86/boot/bzImage
           echo "sha256: $(sha256sum arch/x86/boot/bzImage | cut -d' ' -f1)"
 
+      - name: Check the MuMu vaddress module against this kernel
+        run: |
+          set -eu
+          cd kernel
+          if [ ! -f Module.symvers ]; then
+            echo "no Module.symvers produced"
+            exit 1
+          fi
+          curl -sL -o /tmp/vaddress.ko \
+            "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/vaddress-ko"
+          ls -la /tmp/vaddress.ko
+          python3 check-ko-crc.py Module.symvers /tmp/vaddress.ko
+
       - name: Show kernel info
         run: |
           set -eu
