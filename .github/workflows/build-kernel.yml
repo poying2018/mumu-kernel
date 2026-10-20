@@ -96,38 +96,6 @@ jobs:
             python3 pahole rsync cpio kmod zstd
           bison --version | head -1
 
-      - name: Prepare the x86_64 kdir
-        run: |
-          set -eu
-          clang --version | head -1
-          unset ARCH CROSS_COMPILE
-          export ARCH=x86_64
-
-          KDIR="$GITHUB_WORKSPACE/kdir-x64"
-          rm -rf "$KDIR"
-          mkdir -p "$KDIR"
-
-          # The x86_64 kdir is generated from the checked out 6.1.90 source,
-          # which is the same tree the emulator's own kernel came from.
-          pushd kernel
-
-          # Let the module keep symbols it resolves at runtime.
-          MODPOST=scripts/mod/modpost.c
-          sed -i -E 's/^([[:space:]]*)check_exports\(mod\);/\1\/\/ check_exports(mod);/' "$MODPOST"
-          sed -i -E 's/^([[:space:]]*)s->module = exp->module;/\1\/\/ s->module = exp->module;/' "$MODPOST"
-          sed -i 's/^static void check_exports(/static void __attribute__((unused)) check_exports(/' "$MODPOST"
-          sed -i 's/__version_ext_names\\") =\\n/__version_ext_names\\") = \\"\\"\\n/' "$MODPOST"
-
-          make O="$KDIR" gki_defconfig
-          scripts/config --file "$KDIR/.config" \
-            -d LTO_CLANG -e LTO_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
-          make O="$KDIR" olddefconfig
-          make O="$KDIR" modules_prepare
-          make O="$KDIR" security/selinux/built-in.a
-
-          popd
-          echo "kdir ready: $KDIR"
-
       - name: Apply the emulator kernel config
         run: |
           set -eu
@@ -136,6 +104,8 @@ jobs:
           scripts/config --file .config \
             -d LTO_CLANG -e LTO_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
           make olddefconfig
+          make modules_prepare
+          make security/selinux/built-in.a
           # SukiSU is built in, not a module. Module support stays on: the
           # emulator's own kernel keeps 2573 drivers as modules, and turning
           # them into built-ins grows the image from 12 MB to 50 MB.
@@ -166,9 +136,11 @@ jobs:
           export LLVM_IAS=1
           export KBUILD_BUILD_USER=build
           export KBUILD_BUILD_HOST=build-host
-          KDIR="$GITHUB_WORKSPACE/kdir-x64"
+          # Build in the source tree; the module build then uses the
+          # generated headers from it.
+          KDIR="$PWD"
           MDIR="$PWD/kernel"
-          ODIR="$PWD/out-x64/android14-6.1"
+          ODIR="$PWD/kernel"
 
           ID_ARGS=""
           if [ "${{ inputs.ksu_variant }}" = "official" ]; then
@@ -178,12 +150,14 @@ jobs:
           fi
           echo "identity args: $ID_ARGS"
 
-          make -k -C "$KDIR" M="$ODIR" src="$MDIR" ARCH=x86_64 CC=clang LLVM=1 LLVM_IAS=1 \
+          make -k -C "$MDIR" M="$ODIR" src="$MDIR" ARCH=x86_64 CC=clang LLVM=1 LLVM_IAS=1 \
             CONFIG_KSU=m CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER=y \
             KSU_VERSION=30001 KSU_VERSION_TAG=local \
             $ID_ARGS \
             modules -j"$(nproc)"
-          ls -la arch/x86/boot/bzImage
+          ls -la "$MDIR"/../arch/x86/boot/bzImage 2>/dev/null || \
+            ls -la arch/x86/boot/bzImage 2>/dev/null || true
+          find . -name bzImage -newermt '-10 minutes' | head -3
           echo "sha256: $(sha256sum arch/x86/boot/bzImage | cut -d' ' -f1)"
 
       - name: Check the MuMu vaddress module against this kernel
