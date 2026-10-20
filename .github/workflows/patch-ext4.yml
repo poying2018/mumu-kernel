@@ -13,7 +13,7 @@
 # size; the partition has free space for that.
 name: patch-ext4-kernel
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       ext4_name:
