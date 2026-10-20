@@ -10,7 +10,7 @@
 #              diffing them locates the bytes that hold the identity.
 name: build-mumu-kernel
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       ksu_source:
