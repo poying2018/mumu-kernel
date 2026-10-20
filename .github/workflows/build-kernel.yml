@@ -1,17 +1,13 @@
-# Build a Linux 6.1.90 kernel for the MuMu emulator with SukiSU built in.
+# Build a 6.1.90 kernel for the MuMu emulator with SukiSU built in.
 #
-# MuMu 12 runs Android 15 on a VirtualBox 7.2.4 x86_64 guest. Its kernel is
-# a stock Android GKI 6.1.90 ("perf" flavour: CONFIG_LOCALVERSION="-perf",
-# CONFIG_DEFAULT_HOSTNAME="perf"), built with Android clang r536225. The
-# original kernel image lives in the read-only base disk's ext4 partition and
-# is loaded by the emulator's own loader, not through the Android OTA path.
+# MuMu 12 runs Android 15 on a VirtualBox 7.2.4 x86_64 guest. Its kernel is a
+# stock Android GKI 6.1.90 ("perf" flavour) built with Android clang r536225.
 #
-# This workflow reproduces that kernel from the upstream 6.1.90 release tag
-# with the exact config the running kernel reports, adds SukiSU as a built-in
-# driver, and produces a bzImage that can replace the original.
-#
-# The manager identity is SukiSU's own (cert 0x35c / sha256 947ae944...),
-# which is what the Kbuild defaults already specify.
+# The manager identity is selected by the ksu_variant input:
+#   sukisu   - the SukiSU manager, cert 0x35c (what this project ships)
+#   official - the official KernelSU manager, cert 0x33b, which is the
+#              identity MuMu's own kernel was built with. Building both and
+#              diffing them locates the bytes that hold the identity.
 name: build-mumu-kernel
 
 on:
@@ -25,6 +21,14 @@ on:
         description: 'SukiSU git ref'
         required: true
         default: 'main'
+      ksu_variant:
+        description: 'Manager identity baked into the kernel'
+        required: true
+        default: 'sukisu'
+        type: choice
+        options:
+          - sukisu
+          - official
 
 permissions:
   contents: read
@@ -81,7 +85,6 @@ jobs:
             printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || \
             sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          ls drivers/kernelsu/Kconfig
           echo "integration done"
 
       - name: Apply the emulator kernel config
@@ -90,15 +93,19 @@ jobs:
           cd kernel
           cp "$GITHUB_WORKSPACE/helper/mumu-kernel.config" .config
           scripts/config --file .config \
-            -e LTO_NONE -d LTO_CLANG -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
+            -d LTO_CLANG -e LTO_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
           make olddefconfig
           # SukiSU is built in, not a module. Module support stays on: the
           # emulator's own kernel keeps 2573 drivers as modules, and turning
-          # them into built-ins grows the image from 12 MB to 50 MB, which does
-          # not fit in the boot partition.
+          # them into built-ins grows the image from 12 MB to 50 MB.
           scripts/config --file .config -e KSU
           make olddefconfig
-          grep -E "^CONFIG_(KSU|LOCALVERSION|DEFAULT_HOSTNAME|MODULES)=" .config || true
+          # x86_64 needs CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER: upstream
+          # hardened the syscall table, so the hook has to patch the dispatcher
+          # at runtime instead of relying on a source patch.
+          scripts/config --file .config -e KSU_X86_PATCH_SYSCALL_DISPATCHER
+          make olddefconfig
+          grep -E "^CONFIG_KSU" .config || true
 
       - name: Install build dependencies
         run: |
@@ -108,7 +115,6 @@ jobs:
             bc bison flex libssl-dev libelf-dev libncurses-dev \
             python3 pahole rsync cpio kmod zstd
           bison --version | head -1
-          flex --version
 
       - name: Install the Android clang toolchain
         run: |
@@ -116,7 +122,6 @@ jobs:
           mkdir -p "$HOME/clang"
           curl -sL "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r536225.tar.gz" \
             | tar -xz -C "$HOME/clang"
-          ls "$HOME/clang"/bin/clang
           "$HOME/clang/bin/clang" --version | head -2
 
       - name: Build the kernel
@@ -129,26 +134,25 @@ jobs:
           export LLVM_IAS=1
           export KBUILD_BUILD_USER=build
           export KBUILD_BUILD_HOST=build-host
-          # The release string comes from CONFIG_LOCALVERSION="-perf" in the
-          # config; the trailing '+' is added by setlocalversion because the
-          # tree is not on an annotated tag, exactly like the original.
-          #
-          # x86_64 needs CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER: upstream
-          # hardened the syscall table, so the hook has to patch the dispatcher
-          # at runtime instead of relying on a source patch. The alternative
-          # source patches do not exist for 6.1.
-          scripts/config --file .config -e KSU_X86_PATCH_SYSCALL_DISPATCHER
-          make olddefconfig
-          grep -E "^CONFIG_KSU" .config || true
+          KDIR=/opt/ddk/kdir-x64/android14-6.1
+          MDIR="$PWD/kernel"
+          ODIR="$PWD/out-x64/android14-6.1"
 
-          make -j"$(nproc)" bzImage
+          ID_ARGS=""
+          if [ "${{ inputs.ksu_variant }}" = "official" ]; then
+            ID_ARGS="KSU_EXPECTED_SIZE=0x33b"
+            ID_ARGS="$ID_ARGS KSU_EXPECTED_HASH=c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6"
+            ID_ARGS="$ID_ARGS KSU_PACKAGE_NAME=me.weishu.kernelsu"
+          fi
+          echo "identity args: $ID_ARGS"
+
+          make -k -C "$KDIR" M="$ODIR" src="$MDIR" ARCH=x86_64 CC=clang LLVM=1 LLVM_IAS=1 \
+            CONFIG_KSU=m CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER=y \
+            KSU_VERSION=30001 KSU_VERSION_TAG=local \
+            $ID_ARGS \
+            modules -j"$(nproc)"
           ls -la arch/x86/boot/bzImage
           echo "sha256: $(sha256sum arch/x86/boot/bzImage | cut -d' ' -f1)"
-
-      - name: Check the MuMu vaddress module against this kernel
-        run: |
-          set -eu
-          bash "$GITHUB_WORKSPACE/helper/check-vaddress.sh" "$PWD/kernel" || echo "WARNING: the vaddress check did not pass"
 
       - name: Check the MuMu vaddress module against this kernel
         run: |
@@ -168,10 +172,11 @@ jobs:
           set -eu
           cd kernel
           strings arch/x86/boot/bzImage | grep -E '^Linux version 6\.1' | head -1
+          grep -E "^CONFIG_KSU" .config || true
 
       - name: Upload the kernel image
         uses: actions/upload-artifact@v4
         with:
-          name: bzImage-6.1.90-perf-sukisu
+          name: bzImage-${{ inputs.ksu_variant }}-${{ inputs.kmi }}
           path: kernel/arch/x86/boot/bzImage
           if-no-files-found: error
