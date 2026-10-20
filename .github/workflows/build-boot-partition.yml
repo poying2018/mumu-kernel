@@ -81,12 +81,25 @@ jobs:
           echo "--- before ---"
           debugfs -R "ls -l /" boot.ext4 2>&1 | tail -6
 
+          # debugfs needs the source path relative to its working directory,
+          # and a failed write leaves a zero length file behind, so check the
+          # result instead of trusting the exit status.
           debugfs -w -R "rm /kernel" boot.ext4 2>&1 | tail -1
-          debugfs -w -R "write ${{ inputs.kernel_name }} /kernel" boot.ext4 2>&1 | tail -2
-          # keep the mode and ownership the loader expects
-          debugfs -w -R "set_inode_field /kernel mode 0100644" boot.ext4 2>&1 | tail -1
-          debugfs -w -R "set_inode_field /kernel uid 1000" boot.ext4 2>&1 | tail -1
-          debugfs -w -R "set_inode_field /kernel gid 1000" boot.ext4 2>&1 | tail -1
+          debugfs -w -f /dev/stdin boot.ext4 <<'EOS'
+write ${{ inputs.kernel_name }} /kernel
+set_inode_field /kernel mode 0100644
+set_inode_field /kernel uid 1000
+set_inode_field /kernel gid 1000
+EOS
+          echo "--- after ---"
+          debugfs -R "stat /kernel" boot.ext4 2>&1 | grep -iE "Size|Mode|User" | head -4
+          SIZE=$(debugfs -R "stat /kernel" boot.ext4 2>&1 | grep -oP "Size: \K[0-9]+" | head -1)
+          WANT=$(stat -c%s "${{ inputs.kernel_name }}")
+          echo "installed size: $SIZE, expected: $WANT"
+          if [ "$SIZE" != "$WANT" ]; then
+            echo "the kernel was not installed correctly"
+            exit 1
+          fi
 
           echo "--- after ---"
           debugfs -R "ls -l /" boot.ext4 2>&1 | tail -6
