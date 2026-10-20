@@ -1,29 +1,32 @@
-# Compare the original MuMu kernel with a rebuilt one.
+# Locate the manager identity inside the original MuMu kernel.
 #
-# MuMu's own kernel is a stock Android GKI 6.1.90 with SukiSU built in and
-# the official KernelSU manager identity baked in. Rebuilding the same source
-# with the same identity should produce an almost identical image, so a diff
-# points at whatever MuMu changed, and at the bytes holding the manager
-# identity.
+# MuMu's kernel is a stock Android GKI 6.1.90 with SukiSU built in, using the
+# official KernelSU manager identity. The manager certificate hash and length
+# are compile time constants, so finding them in the image gives the bytes a
+# patch has to change to make the kernel accept the SukiSU manager instead.
 name: compare-vmlinux
 
 on:
   workflow_dispatch:
     inputs:
-      ksu_variant:
-        description: 'Manager identity to bake in'
+      kernel_release:
+        description: 'Release holding the original kernel'
         required: true
-        default: 'official'
-        type: choice
-        options:
-          - official
-          - sukisu
+        default: 'plain-kernel-test'
+      kernel_asset:
+        description: 'Asset name of the original kernel'
+        required: true
+        default: 'kernel'
+      manager_hash:
+        description: 'Manager certificate SHA-256 the kernel was built with'
+        required: true
+        default: 'c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6'
 
 permissions:
   contents: read
 
 jobs:
-  compare:
+  locate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this repository
@@ -31,99 +34,31 @@ jobs:
         with:
           path: helper
 
-      - name: Fetch both kernels
+      - name: Fetch the original kernel
         run: |
           set -eu
           cd helper
           curl -sL -o kernel-orig.bin \
-            "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/kernel"
+            "https://github.com/poying2018/mumu-kernel/releases/download/${{ inputs.kernel_release }}/${{ inputs.kernel_asset }}"
           ls -la kernel-orig.bin
-          curl -sL -o kernel-new.bin \
-            "https://github.com/poying2018/mumu-kernel/releases/download/${{ inputs.ksu_variant }}-kernel/bzImage"
-          ls -la kernel-new.bin
 
-      - name: Locate the manager identity in the original kernel
+      - name: Locate the identity constants
         run: |
           set -eu
           cd helper
-          # The manager certificate hash is a plain string in the kernel
-          # image. Its address is what a patch has to find, together with the
-          # certificate length the comparison uses.
-          python3 - <<'PYEOF'
-import re
+          python3 locate-identity.py kernel-orig.bin "${{ inputs.manager_hash }}"
 
-data = open("kernel-orig.bin", "rb").read()
-want = b"c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6"
-for m in re.finditer(re.escape(want), data):
-    off = m.start()
-    print("hash string at 0x%x" % off)
-    with open("hash_offset.txt", "w") as f:
-        f.write("0x%x" % off)
-PYEOF
+      - name: Report
+        run: |
+          set -eu
+          cd helper
           cat hash_offset.txt
-
-          # Dump the region and look for the code that compares the length.
-          OFF=$(cat hash_offset.txt)
           python3 -c "
-import sys
-off = int(sys.argv[1], 16)
-data = open('kernel-orig.bin','rb').read()
-start = max(0, off - 0x2000)
-open('region.bin','wb').write(data[start:off+0x2000])
-print('region dumped, hash at +0x%x' % (off - start))
-" "$OFF"
-          objdump -D -b binary -m i386:x86-64 region.bin 2>/dev/null | head -5 || true
-          echo "--- looking for 0x33b as an immediate near the string ---"
-          python3 -c "
-import re, struct
+import re
 data = open('kernel-orig.bin','rb').read()
 off = int(open('hash_offset.txt').read(), 16)
-needle = struct.pack('<I', 0x33b)
-hits = [m.start() for m in re.finditer(re.escape(needle), data)]
-near = [h for h in hits if abs(h - off) < 0x4000]
-print('0x33b occurrences near the hash:', [hex(h) for h in near])
-print('all 0x33b occurrences:', len(hits))
-"
-
-      - name: Extract the vmlinux images
-        run: |
-          set -eu
-          cd helper
-          curl -sL -o extract-vmlinux \
-            "https://raw.githubusercontent.com/torvalds/linux/v6.1/scripts/extract-vmlinux"
-          chmod +x extract-vmlinux
-          ./extract-vmlinux kernel-orig.bin > vmlinux-orig.bin 2>/dev/null || true
-          ./extract-vmlinux kernel-new.bin > vmlinux-new.bin 2>/dev/null || true
-          ls -la vmlinux-*.bin 2>/dev/null || true
-
-      - name: Compare the manager identity constants
-        run: |
-          set -eu
-          cd helper
-          for f in vmlinux-orig.bin vmlinux-new.bin; do
-            [ -f "$f" ] || continue
-            echo "=== $f ==="
-            strings "$f" | grep -E "^[0-9a-f]{64}$" | sort -u | head -10
-            echo "--- ksu symbols ---"
-            nm "$f" 2>/dev/null | grep -iE "expected_size|expected_hash|manager" | head -10
-          done
-
-      - name: Diff the two images
-        run: |
-          set -eu
-          cd helper
-          if [ -f vmlinux-orig.bin ] && [ -f vmlinux-new.bin ]; then
-            echo "sizes: $(stat -c%s vmlinux-orig.bin) vs $(stat -c%s vmlinux-new.bin)"
-            cmp -l vmlinux-orig.bin vmlinux-new.bin 2>/dev/null | head -40 || true
-            echo "differing byte count:"
-            cmp -l vmlinux-orig.bin vmlinux-new.bin 2>/dev/null | wc -l || true
-          fi
-
-      - name: Upload the extracted images
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vmlinux-compare-${{ inputs.ksu_variant }}
-          path: |
-            helper/vmlinux-*.bin
-          if-no-files-found: ignore
+start = max(0, off - 0x4000)
+chunk = data[start:off+0x4000]
+for m in re.finditer(rb'[ -~]{8,}', chunk):
+    print('%08x %s' % (start + m.start(), m.group().decode(errors='replace')))
+" | head -60
