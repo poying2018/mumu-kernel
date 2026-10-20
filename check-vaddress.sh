@@ -21,7 +21,7 @@ trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
 
 curl -sL -o vaddress.ko \
-    "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/vaddress-ko"
+    "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/vaddress.ko"
 if [ ! -s vaddress.ko ]; then
     echo "the vaddress module could not be downloaded"
     exit 1
