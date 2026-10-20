@@ -8,7 +8,7 @@
 # Use extra_mb=0 for the normal path.
 name: build-boot-partition
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       release_tag:
