@@ -42,7 +42,7 @@ jobs:
           ls -la kernel-plain.bin
           # the original kernel image, as a release asset of the same repo
           curl -sL -o kernel-orig.bin \
-            "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/kernel-orig"
+            "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/kernel"
           ls -la kernel-orig.bin
 
       - name: Extract both vmlinux images
