@@ -18,7 +18,7 @@ on:
       release_asset:
         description: 'Asset name of the kernel'
         required: true
-        default: 'bzImage-plain'
+        default: 'bzImage'
       kernel_name:
         description: 'Name of the replacement kernel file'
         required: true
