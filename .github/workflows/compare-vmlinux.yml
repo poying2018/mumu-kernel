@@ -42,16 +42,58 @@ jobs:
             "https://github.com/poying2018/mumu-kernel/releases/download/${{ inputs.ksu_variant }}-kernel/bzImage"
           ls -la kernel-new.bin
 
+      - name: Locate the manager identity in the original kernel
+        run: |
+          set -eu
+          cd helper
+          # The manager certificate hash is a plain string in the kernel
+          # image. Its address is what a patch has to find, together with the
+          # certificate length the comparison uses.
+          python3 - <<'PYEOF'
+import re
+
+data = open("kernel-orig.bin", "rb").read()
+want = b"c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6"
+for m in re.finditer(re.escape(want), data):
+    off = m.start()
+    print("hash string at 0x%x" % off)
+    with open("hash_offset.txt", "w") as f:
+        f.write("0x%x" % off)
+PYEOF
+          cat hash_offset.txt
+
+          # Dump the region and look for the code that compares the length.
+          OFF=$(cat hash_offset.txt)
+          python3 -c "
+import sys
+off = int(sys.argv[1], 16)
+data = open('kernel-orig.bin','rb').read()
+start = max(0, off - 0x2000)
+open('region.bin','wb').write(data[start:off+0x2000])
+print('region dumped, hash at +0x%x' % (off - start))
+" "$OFF"
+          objdump -D -b binary -m i386:x86-64 region.bin 2>/dev/null | head -5 || true
+          echo "--- looking for 0x33b as an immediate near the string ---"
+          python3 -c "
+import re, struct
+data = open('kernel-orig.bin','rb').read()
+off = int(open('hash_offset.txt').read(), 16)
+needle = struct.pack('<I', 0x33b)
+hits = [m.start() for m in re.finditer(re.escape(needle), data)]
+near = [h for h in hits if abs(h - off) < 0x4000]
+print('0x33b occurrences near the hash:', [hex(h) for h in near])
+print('all 0x33b occurrences:', len(hits))
+"
+
       - name: Extract the vmlinux images
         run: |
           set -eu
           cd helper
-          # the kernel source ships the extractor
           curl -sL -o extract-vmlinux \
             "https://raw.githubusercontent.com/torvalds/linux/v6.1/scripts/extract-vmlinux"
           chmod +x extract-vmlinux
-          ./extract-vmlinux kernel-orig.bin > vmlinux-orig.bin || true
-          ./extract-vmlinux kernel-new.bin > vmlinux-new.bin || true
+          ./extract-vmlinux kernel-orig.bin > vmlinux-orig.bin 2>/dev/null || true
+          ./extract-vmlinux kernel-new.bin > vmlinux-new.bin 2>/dev/null || true
           ls -la vmlinux-*.bin 2>/dev/null || true
 
       - name: Compare the manager identity constants
