@@ -91,15 +91,10 @@ jobs:
             sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           echo "integration done"
 
-      - name: Link the emulator's vaddress driver into the kernel
+      - name: Add the emulator's vaddress driver object
         run: |
           set -eu
           bash "$GITHUB_WORKSPACE/helper/prepare-vaddress.sh" "$PWD/kernel"
-
-      - name: Build the vaddress driver into the kernel
-        run: |
-          set -eu
-          bash "$GITHUB_WORKSPACE/helper/link-vaddress.sh" "$PWD/kernel"
 
       - name: Install build dependencies
         run: |
@@ -131,6 +126,11 @@ jobs:
           scripts/config --file .config -e KSU_X86_PATCH_SYSCALL_DISPATCHER
           make olddefconfig
           grep -E "^CONFIG_KSU" .config || true
+
+      - name: Enable the vaddress driver in the config
+        run: |
+          set -eu
+          bash "$GITHUB_WORKSPACE/helper/link-vaddress.sh" "$PWD/kernel"
 
       - name: Install the Android clang toolchain
         run: |
