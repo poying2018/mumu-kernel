@@ -75,3 +75,4 @@ chunk = data[max(0,off-0x2000):off+0x2000]
 for m in re.finditer(rb'[ -~]{8,}', chunk):
     print('%08x %s' % (max(0,off-0x2000)+m.start(), m.group().decode(errors='replace')))
 " | head -40
+# refresh
