@@ -150,11 +150,11 @@ jobs:
           export LLVM_IAS=1
           export KBUILD_BUILD_USER=build
           export KBUILD_BUILD_HOST=build-host
-          # Build in the source tree; the module build then uses the
-          # generated headers from it.
+          # The build step runs inside the kernel tree, so the module build
+          # takes the current directory as both source and output.
           KDIR="$PWD"
-          MDIR="$PWD/kernel"
-          ODIR="$PWD/kernel"
+          MDIR="$PWD"
+          ODIR="$PWD"
 
           ID_ARGS=""
           if [ "${{ inputs.ksu_variant }}" = "official" ]; then
@@ -164,7 +164,7 @@ jobs:
           fi
           echo "identity args: $ID_ARGS"
 
-          make -k -C "$MDIR" M="$ODIR" src="$MDIR" ARCH=x86_64 CC=clang LLVM=1 LLVM_IAS=1 \
+          make -k -C "$KDIR" M="$ODIR" src="$MDIR" ARCH=x86_64 CC=clang LLVM=1 LLVM_IAS=1 \
             CONFIG_KSU=m CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER=y \
             KSU_VERSION=30001 KSU_VERSION_TAG=local \
             $ID_ARGS \
