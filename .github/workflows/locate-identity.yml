@@ -1,0 +1,77 @@
+# Locate the manager identity constants inside MuMu's own kernel.
+#
+# MuMu's kernel is a stock Android GKI 6.1.90 with SukiSU built in, using the
+# official KernelSU manager identity. The manager certificate hash and its
+# length are compile time constants, so finding them in the uncompressed
+# kernel gives the bytes that have to change for the kernel to accept the
+# SukiSU manager instead.
+name: locate-identity
+
+"on":
+  workflow_dispatch:
+    inputs:
+      kernel_release:
+        description: 'Release holding the original kernel'
+        required: true
+        default: 'plain-kernel-test'
+      kernel_asset:
+        description: 'Asset name of the original kernel'
+        required: true
+        default: 'kernel'
+      manager_hash:
+        description: 'Manager certificate SHA-256 the kernel was built with'
+        required: true
+        default: 'c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6'
+      manager_size:
+        description: 'Manager certificate length the kernel was built with'
+        required: true
+        default: '0x33b'
+
+permissions:
+  contents: read
+
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: helper
+
+      - name: Fetch the original kernel
+        run: |
+          set -eu
+          cd helper
+          curl -sL -o kernel-orig.bin \
+            "https://github.com/poying2018/mumu-kernel/releases/download/${{ inputs.kernel_release }}/${{ inputs.kernel_asset }}"
+          ls -la kernel-orig.bin
+
+      - name: Extract the uncompressed kernel
+        run: |
+          set -eu
+          cd helper
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y liblz4-tool zstd >/dev/null
+          python3 extract_vmlinux.py kernel-orig.bin vmlinux-orig.bin
+
+      - name: Locate the identity constants
+        run: |
+          set -eu
+          cd helper
+          python3 locate_identity.py vmlinux-orig.bin \
+            "${{ inputs.manager_hash }}" "${{ inputs.manager_size }}"
+
+      - name: Report
+        run: |
+          set -eu
+          cd helper
+          cat identity.txt
+          python3 -c "
+import re
+data = open('vmlinux-orig.bin','rb').read()
+off = int(open('identity.txt').read().split()[1], 16)
+chunk = data[max(0,off-0x2000):off+0x2000]
+for m in re.finditer(rb'[ -~]{8,}', chunk):
+    print('%08x %s' % (max(0,off-0x2000)+m.start(), m.group().decode(errors='replace')))
+" | head -40
