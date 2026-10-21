@@ -247,3 +247,4 @@ KCONFEOF
           name: bzImage-${{ inputs.ksu_variant }}-${{ inputs.kmi }}
           path: kernel/arch/x86/boot/bzImage
           if-no-files-found: error
+# refreshed
