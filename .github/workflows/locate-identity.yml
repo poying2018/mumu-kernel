@@ -1,13 +1,4 @@
-# Locate the manager identity constants inside MuMu's own kernel.
-#
-# MuMu's kernel is a stock Android GKI 6.1.90 with SukiSU built in, using the
-# official KernelSU manager identity. The manager certificate hash and its
-# length are compile time constants, so finding them in the uncompressed
-# kernel gives the bytes that have to change for the kernel to accept the
-# SukiSU manager instead.
-name: locate-identity
-
-"on":
+on:
   workflow_dispatch:
     inputs:
       kernel_release:
@@ -27,6 +18,15 @@ name: locate-identity
         required: true
         default: '0x33b'
 
+name: locate-identity
+
+# Locate the manager identity constants inside MuMu's own kernel.
+#
+# MuMu's kernel is a stock Android GKI 6.1.90 with SukiSU built in, using the
+# official KernelSU manager identity. The manager certificate hash and its
+# length are compile time constants, so finding them in the uncompressed
+# kernel gives the bytes that have to change for the kernel to accept the
+# SukiSU manager instead.
 permissions:
   contents: read
 
@@ -75,4 +75,3 @@ chunk = data[max(0,off-0x2000):off+0x2000]
 for m in re.finditer(rb'[ -~]{8,}', chunk):
     print('%08x %s' % (max(0,off-0x2000)+m.start(), m.group().decode(errors='replace')))
 " | head -40
-# refresh
