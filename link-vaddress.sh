@@ -1,13 +1,15 @@
 #!/bin/bash
 # Write the Kbuild and Kconfig fragments for the built-in vaddress driver.
 #
-# The driver objects come from the emulator's own module; these two files
-# tell the kernel build to link them in.
+# The driver object comes from the emulator's own module; these two files tell
+# the kernel build to link it in.
 set -eu
 
 KDIR="$1"
 cd "$KDIR"
 
+# The module object is linked in directly, so the Makefile names it rather
+# than adding a subdirectory.
 cat > drivers/vaddress/Makefile <<'MAKEEOF'
 obj-$(CONFIG_VADDRESS) += vaddress.o
 MAKEEOF
@@ -32,3 +34,12 @@ grep -q "vaddress" drivers/Makefile || \
 scripts/config --file .config -e VADDRESS
 make olddefconfig
 grep -E "^CONFIG_VADDRESS" .config
+
+# The module was built with modversions and carries a __versions section the
+# kernel build has no use for; drop it so the link does not complain.
+if command -v objcopy >/dev/null 2>&1; then
+    objcopy --remove-section=__versions \
+            --remove-section=.modinfo \
+            --remove-section=.gnu.linkonce.this_module \
+            drivers/vaddress/vaddress.o 2>/dev/null || true
+fi
