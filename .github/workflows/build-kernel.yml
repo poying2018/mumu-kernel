@@ -94,46 +94,12 @@ jobs:
       - name: Link the emulator's vaddress driver into the kernel
         run: |
           set -eu
-          cd kernel
-          mkdir -p drivers/vaddress
-
-          # The module is a relocatable object; unpack it so its objects can
-          # be linked into the kernel image.
-          curl -sL -o /tmp/vaddress.ko \
-            "https://github.com/poying2018/mumu-kernel/releases/download/plain-kernel-test/vaddress.ko"
-          ls -la /tmp/vaddress.ko
-          mkdir -p /tmp/vaddress
-          cd /tmp/vaddress
-          ar x /tmp/vaddress.ko
-          ls -la
-
-          cp *.o /home/runner/work/mumu-kernel/mumu-kernel/kernel/drivers/vaddress/ 2>/dev/null || true
-          ls -la /home/runner/work/mumu-kernel/mumu-kernel/kernel/drivers/vaddress/
+          bash "$GITHUB_WORKSPACE/helper/prepare-vaddress.sh" "$PWD/kernel"
 
       - name: Build the vaddress driver into the kernel
         run: |
           set -eu
-          cd kernel
-          cat > drivers/vaddress/Makefile <<'MAKEEOF'
-obj-$(CONFIG_VADDRESS) += vaddress.o
-MAKEEOF
-          cat > drivers/vaddress/Kconfig <<'KCONFEOF'
-config VADDRESS
-	tristate "MuMu virtual address device"
-	depends on PCI
-	default y
-	help
-	  The emulator exposes a private PCI device that carries the
-	  channel between the guest and the host. Without a driver for it
-	  the guest cannot finish booting.
-KCONFEOF
-          grep -q "drivers/vaddress/Kconfig" drivers/Kconfig || \
-            sed -i '/^endmenu/i source "drivers/vaddress/Kconfig"' drivers/Kconfig
-          grep -q "vaddress" drivers/Makefile || \
-            printf "\nobj-\$(CONFIG_VADDRESS) += vaddress/\n" >> drivers/Makefile
-          scripts/config --file .config -e VADDRESS
-          make olddefconfig
-          grep -E "^CONFIG_VADDRESS" .config
+          bash "$GITHUB_WORKSPACE/helper/link-vaddress.sh" "$PWD/kernel"
 
       - name: Install build dependencies
         run: |
@@ -247,4 +213,3 @@ KCONFEOF
           name: bzImage-${{ inputs.ksu_variant }}-${{ inputs.kmi }}
           path: kernel/arch/x86/boot/bzImage
           if-no-files-found: error
-# refreshed
