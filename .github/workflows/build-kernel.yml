@@ -34,8 +34,17 @@ name: build-mumu-kernel
           - sukisu
           - official
 
+      kernel_ref:
+        description: 'Kernel source tag in aosp-mirror/kernel_common'
+        required: true
+        default: 'android14-6.1.90_r00'
+      build_name:
+        description: 'Release the kernel is uploaded to'
+        required: true
+        default: 'kernel-test'
+
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -45,7 +54,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aosp-mirror/kernel_common
-          ref: android14-6.1.90_r00
+          ref: ${{ inputs.kernel_ref }}
           path: kernel
           fetch-depth: 1
           submodules: false
@@ -213,3 +222,17 @@ jobs:
           name: bzImage-${{ inputs.ksu_variant }}-${{ inputs.kmi }}
           path: kernel/arch/x86/boot/bzImage
           if-no-files-found: error
+
+      - name: Publish the kernel to a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.build_name }}
+        run: |
+          set -eu
+          cp kernel/arch/x86/boot/bzImage "kernel-${{ inputs.kernel_ref }}.bzImage"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "kernel-${{ inputs.kernel_ref }}.bzImage"               --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "kernel-${{ inputs.kernel_ref }}.bzImage"               --title "kernel ${{ inputs.kernel_ref }}"               --notes "SukiSU kernel built from ${{ inputs.kernel_ref }}"               --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY"             --json assets --jq '.assets[].name'
