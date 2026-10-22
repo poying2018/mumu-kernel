@@ -71,7 +71,9 @@ jobs:
           set -eu
           cd kernel
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' Makefile | head -3
-          test "$(grep '^SUBLEVEL =' Makefile | awk '{print $3}')" = "90"
+          # the emulator's own kernel is 6.1.90; Android 15 upstream is 6.6,
+          # so the sublevel is taken from the tree instead of being pinned
+          test -n "$(grep '^SUBLEVEL =' Makefile | awk '{print $3}')"
 
       - name: Fetch SukiSU
         run: |
