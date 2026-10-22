@@ -54,7 +54,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aosp-mirror/kernel_common
-          ref: ${{ inputs.kernel_ref }}
+          # the push trigger has no inputs, so the tag is pinned here
+          ref: ${{ inputs.kernel_ref || 'android14-6.1.90_r00' }}
           path: kernel
           fetch-depth: 1
           submodules: false
