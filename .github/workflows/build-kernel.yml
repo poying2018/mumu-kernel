@@ -55,7 +55,7 @@ jobs:
         with:
           repository: aosp-mirror/kernel_common
           # the push trigger has no inputs, so the tag is pinned here
-          ref: ${{ inputs.kernel_ref || 'android14-6.1.90_r00' }}
+          ref: ${{ inputs.kernel_ref != '' && inputs.kernel_ref || 'android14-6.1.90_r00' }}
           path: kernel
           fetch-depth: 1
           submodules: false
@@ -75,8 +75,8 @@ jobs:
       - name: Fetch SukiSU
         run: |
           set -eu
-          git clone --depth 1 --branch "${{ inputs.ksu_ref }}" \
-            "https://github.com/${{ inputs.ksu_source }}.git" KernelSU
+          git clone --depth 1 --branch "${{ inputs.ksu_ref != '' && inputs.ksu_ref || 'main' }}" \
+            "https://github.com/${{ inputs.ksu_source != '' && inputs.ksu_source || 'SukiSU-Ultra/SukiSU-Ultra' }}.git" KernelSU
           cd KernelSU
           git rev-parse HEAD
 
@@ -167,7 +167,7 @@ jobs:
           ODIR="$PWD"
 
           ID_ARGS=""
-          if [ "${{ inputs.ksu_variant }}" = "official" ]; then
+          if [ "${{ inputs.ksu_variant != '' && inputs.ksu_variant || 'sukisu' }}" = "official" ]; then
             ID_ARGS="KSU_EXPECTED_SIZE=0x33b"
             ID_ARGS="$ID_ARGS KSU_EXPECTED_HASH=c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6"
             ID_ARGS="$ID_ARGS KSU_PACKAGE_NAME=me.weishu.kernelsu"
@@ -207,14 +207,14 @@ jobs:
       - name: Upload the kernel image
         uses: actions/upload-artifact@v4
         with:
-          name: bzImage-${{ inputs.ksu_variant }}-${{ inputs.kmi }}
+          name: bzImage-${{ inputs.ksu_variant != '' && inputs.ksu_variant || 'sukisu' }}-${{ inputs.kmi != '' && inputs.kmi || 'kernel' }}
           path: kernel/arch/x86/boot/bzImage
           if-no-files-found: error
 
       - name: Publish the kernel to a release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.build_name }}
+          TAG: ${{ inputs.build_name != '' && inputs.build_name || 'kernel-test' }}
         run: |
           set -eu
           cp kernel/arch/x86/boot/bzImage "kernel-${{ inputs.kernel_ref }}.bzImage"
