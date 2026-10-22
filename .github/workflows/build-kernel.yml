@@ -122,7 +122,15 @@ jobs:
         run: |
           set -eu
           cd kernel
-          cp "$GITHUB_WORKSPACE/helper/mumu-kernel.config" .config
+          # The emulator's own kernel is 6.1.90, so its config is the right
+          # one for that tree. A 6.6 tree (what Android 15 upstream uses)
+          # needs its own GKI config instead, because the symbol set differs.
+          if grep -qE '^SUBLEVEL = 90$' Makefile; then
+            cp "$GITHUB_WORKSPACE/helper/mumu-kernel.config" .config
+          else
+            make ARCH=x86_64 gki_defconfig
+            echo "built the tree's gki_defconfig instead"
+          fi
           scripts/config --file .config \
             -d LTO_CLANG -e LTO_NONE -d LTO_CLANG_THIN -d LTO_CLANG_FULL -d THINLTO
           make olddefconfig
